@@ -1,4 +1,5 @@
 name: Build ROCm Wheels and Publish to PyPI
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,108 +15,151 @@ on:
         description: 'ROCm version'
         required: false
         default: '7.1'
+
 permissions:
   contents: write
   pages: write
   id-token: write
+
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    runs-on:
-      labels: self-hosted
+    runs-on: self-hosted
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build ROCm base image
+
+      - name: Build ROCm base image (full)
         run: |
           docker buildx build \
             --file docker/Dockerfile.rocm_base.minimal \
-            --tag rocm-base:local \
+            --tag rocm/vllm-dev:base \
+            --build-arg PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
+            --build-arg PYTHON_VERSION=${{ github.event.inputs.python_version }} \
+            --load \
+            .
+
+      - name: Build debs stage for wheel extraction
+        run: |
+          docker buildx build \
+            --file docker/Dockerfile.rocm_base.minimal \
+            --tag rocm-base-debs:local \
             --target debs \
             --build-arg PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
             --build-arg PYTHON_VERSION=${{ github.event.inputs.python_version }} \
             --load \
             .
+
       - name: Extract wheels from Docker image
         run: |
           mkdir -p artifacts/base-wheels
-          container_id=$(docker create rocm-base:local)
+          container_id=$(docker create rocm-base-debs:local)
           docker cp ${container_id}:/app/debs/. artifacts/base-wheels/
           docker rm ${container_id}
           ls -lh artifacts/base-wheels/
+
+      - name: Export base Docker image for reuse
+        run: |
+          mkdir -p artifacts/docker-image
+          docker save rocm/vllm-dev:base | gzip > artifacts/docker-image/rocm-base-image.tar.gz
+          ls -lh artifacts/docker-image/
+
       - name: Upload base wheels
         uses: actions/upload-artifact@v4
         with:
           name: rocm-base-wheels
           path: artifacts/base-wheels/*.whl
           retention-days: 7
+
+      - name: Upload base Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocm-base-image
+          path: artifacts/docker-image/rocm-base-image.tar.gz
+          retention-days: 7
+
   collect-dependency-wheels:
     name: Collect Dependency Wheels from PyPI
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ github.event.inputs.python_version }}
+
       - name: Install pip-tools
         run: |
           python -m pip install --upgrade pip
           pip install pip-tools packaging requests
+
       - name: Download dependency wheels with version ranges
         run: |
           python .github/scripts/download_dependency_wheels.py \
             --requirements requirements/rocm.txt \
             --output-dir artifacts/dependency-wheels \
             --python-version ${{ github.event.inputs.python_version }}
+
       - name: List downloaded wheels
         run: |
           echo "Downloaded wheels:"
           ls -lh artifacts/dependency-wheels/
           echo "Total size:"
           du -sh artifacts/dependency-wheels/
+
       - name: Upload dependency wheels
         uses: actions/upload-artifact@v4
         with:
           name: dependency-wheels
           path: artifacts/dependency-wheels/*.whl
           retention-days: 7
+
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    runs-on:
-      labels: self-hosted
+    runs-on: self-hosted
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build ROCm base image (final stage)
+
+      - name: Download base Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-base-image
+          path: artifacts/docker-image
+
+      - name: Load base Docker image
         run: |
-          docker buildx build \
-            --file docker/Dockerfile.rocm_base.minimal \
-            --tag rocm-base:local \
-            --build-arg PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
-            --build-arg PYTHON_VERSION=${{ github.event.inputs.python_version }} \
-            --load \
+          gunzip -c artifacts/docker-image/rocm-base-image.tar.gz | docker load
+          docker images rocm/vllm-dev:base
+
+      - name: Build vLLM wheel using Dockerfile.rocm
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --file docker/Dockerfile.rocm \
+            --tag vllm-rocm:export \
+            --target export_vllm \
+            --build-arg BASE_IMAGE=rocm/vllm-dev:base \
+            --build-arg ARG_PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
+            --build-arg REMOTE_VLLM=0 \
             .
-      - name: Build vLLM wheel
+
+      - name: Extract vLLM wheel from Docker image
         run: |
-          docker run --rm \
-            -v $(pwd):/workspace \
-            -w /workspace \
-            -e PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
-            -e VLLM_TARGET_DEVICE=rocm \
-            -e ROCM_VERSION=${{ github.event.inputs.rocm_version }} \
-            rocm-base:local \
-            bash -c "
-              pip install -r requirements/rocm-build.txt && \
-              python3 setup.py bdist_wheel --dist-dir=dist && \
-              ls -lh dist/
-            "
+          mkdir -p dist
+          container_id=$(docker create vllm-rocm:export)
+          docker cp ${container_id}:/ dist/
+          docker rm ${container_id}
+          ls -lh dist/*.whl
+
       - name: Install auditwheel and repair wheel
         run: |
           python -m pip install auditwheel patchelf
@@ -126,40 +170,51 @@ jobs:
             cp "\$wheel" artifacts/vllm-wheel/
           done
           ls -lh artifacts/vllm-wheel/
+
       - name: Upload vLLM wheel
         uses: actions/upload-artifact@v4
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel/*.whl
           retention-days: 7
+
   create-pypi-repository:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, collect-dependency-wheels, build-vllm-wheel]
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ github.event.inputs.python_version }}
+
       - name: Install dumb-pypi
         run: |
           pip install dumb-pypi
+
       - name: Organize wheels
         run: |
           mkdir -p pypi-repo/packages
+
+          # Copy all wheels to packages directory
           find artifacts -name "*.whl" -exec cp {} pypi-repo/packages/ \;
+
           echo "Total wheels collected:"
           ls -lh pypi-repo/packages/
           echo "Total count: $(ls pypi-repo/packages/ | wc -l)"
+
       - name: Generate PyPI simple repository
         run: |
           cd pypi-repo
@@ -168,10 +223,14 @@ jobs:
             --packages-url "https://embeddedllm.github.io/vllm-rocm/packages" \
             --output-dir . \
             --title "vLLM ROCm PyPI Repository"
+
+          # Verify structure
           echo "Repository structure:"
           tree -L 2 || find . -type d
+
       - name: Copy to gh-pages
         run: |
+          # Initialize gh-pages if it doesn't exist
           if [ ! -d "gh-pages/.git" ]; then
             mkdir -p gh-pages
             cd gh-pages
@@ -179,10 +238,17 @@ jobs:
             git checkout -b gh-pages
             cd ..
           fi
+
+          # Remove old content and copy new
           rm -rf gh-pages/*
           cp -r pypi-repo/* gh-pages/
+
           cd gh-pages
+
+          # Create .nojekyll to prevent GitHub Pages from ignoring directories with underscores
           touch .nojekyll
+
+          # Create index.html
           cat > index.html << 'EOF'
           <!DOCTYPE html>
           <html>
@@ -197,10 +263,13 @@ jobs:
           <body>
               <h1>vLLM ROCm PyPI Repository</h1>
               <p>This is a custom PyPI repository for vLLM with ROCm support and all dependencies.</p>
+
               <h2>Installation</h2>
               <pre><code>pip install vllm-rocm --index-url https://embeddedllm.github.io/vllm-rocm/simple/</code></pre>
+
               <h2>Available Packages</h2>
               <p><a href="simple/">Browse packages</a></p>
+
               <h2>Build Information</h2>
               <ul>
                   <li>ROCm Version: ${{ github.event.inputs.rocm_version }}</li>
@@ -212,6 +281,7 @@ jobs:
           </body>
           </html>
           EOF
+
       - name: Commit and push to gh-pages
         run: |
           cd gh-pages
@@ -220,11 +290,12 @@ jobs:
           git add -A
           git commit -m "Update PyPI repository - $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes to commit"
           git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages
+
       - name: Summary
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo " PyPI repository updated successfully!" >> $GITHUB_STEP_SUMMARY
+          echo " PyPI repository updated successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Command" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
