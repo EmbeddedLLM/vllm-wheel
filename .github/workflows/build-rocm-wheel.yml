@@ -23,7 +23,7 @@ jobs:
     name: Build ROCm Base Wheels
     runs-on: 
       group: AMDInternal
-      labels: ellm043
+      labels: [self-hosted, ellm043]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -89,7 +89,7 @@ jobs:
     needs: build-base-wheels
     runs-on: 
       group: AMDInternal
-      labels: ellm043
+      labels: [self-hosted, ellm043]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
