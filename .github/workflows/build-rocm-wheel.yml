@@ -21,7 +21,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    runs-on: ubuntu-latest-l
+    runs-on: ellm043
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
