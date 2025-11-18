@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for correct version detection
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build ROCm base image (full)
@@ -99,6 +101,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for correct version detection
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -127,14 +131,15 @@ jobs:
           WHEEL_COUNT=$(ls artifacts/dependency-wheels/*.whl 2>/dev/null | wc -l)
           echo "Downloaded $WHEEL_COUNT wheels"
 
-          if [ "$WHEEL_COUNT" -lt 40 ]; then
-            echo "::error::Too few wheels downloaded ($WHEEL_COUNT). Expected at least 40."
+          # With transitive dependencies, we should have 150+ wheels
+          if [ "$WHEEL_COUNT" -lt 150 ]; then
+            echo "::error::Too few wheels downloaded ($WHEEL_COUNT). Expected at least 150 (including transitive dependencies)."
             echo "::error::Check the download logs above for failures."
             exit 1
           fi
 
-          # Check for specific critical packages
-          CRITICAL_PKGS="regex numpy transformers tokenizers protobuf pydantic aiohttp requests tqdm fastapi"
+          # Check for specific critical packages (including transitive deps)
+          CRITICAL_PKGS="regex numpy transformers tokenizers protobuf pydantic aiohttp requests tqdm fastapi anyio"
           MISSING=""
 
           for pkg in $CRITICAL_PKGS; do
@@ -166,6 +171,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download base Docker image (normal mode)
         if: github.event.inputs.debug_mode != 'true'
@@ -222,6 +229,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download all artifacts (normal mode)
         if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'

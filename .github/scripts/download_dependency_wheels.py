@@ -129,13 +129,13 @@ def download_wheels(
         try:
             # Use pip download with specific Python version
             # Try to get binary wheels first, but allow source builds as fallback
+            # NOTE: Not using --no-deps to include all transitive dependencies
             cmd = [
                 sys.executable,
                 "-m",
                 "pip",
                 "download",
                 "--prefer-binary",
-                "--no-deps",
                 "--dest",
                 str(output_dir),
                 "--python-version",
@@ -286,11 +286,11 @@ def main():
     print(f"Downloaded {len(wheels)} wheels to {args.output_dir}")
     print(f"{'=' * 60}")
 
-    # Validate critical packages were downloaded
+    # Validate critical packages were downloaded (including key transitive dependencies)
     CRITICAL_PACKAGES = {
         'regex', 'numpy', 'transformers', 'tokenizers', 'protobuf',
         'pydantic', 'aiohttp', 'requests', 'tqdm', 'fastapi',
-        'typing-extensions', 'packaging', 'pyyaml'
+        'typing-extensions', 'packaging', 'pyyaml', 'anyio'
     }
 
     # Get set of downloaded package names (normalized)
