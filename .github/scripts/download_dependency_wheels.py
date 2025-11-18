@@ -127,9 +127,11 @@ def download_wheels(
         print(f"  Downloading {package_spec}...")
 
         try:
-            # Use pip download with specific Python version
-            # Try to get binary wheels first, but allow source builds as fallback
+            # Use pip download for current platform
             # NOTE: Not using --no-deps to include all transitive dependencies
+            # NOTE: Not using --python-version or --platform because pip doesn't allow them
+            #       with dependency downloads. Instead, pip uses the current environment's
+            #       Python version and platform (which is correct for GitHub Actions runner)
             cmd = [
                 sys.executable,
                 "-m",
@@ -138,23 +140,6 @@ def download_wheels(
                 "--prefer-binary",
                 "--dest",
                 str(output_dir),
-                "--python-version",
-                python_version,
-                # Multiple platform tags to catch more pre-built wheels
-                "--platform",
-                "linux_x86_64",
-                "--platform",
-                "manylinux1_x86_64",
-                "--platform",
-                "manylinux2010_x86_64",
-                "--platform",
-                "manylinux2014_x86_64",
-                "--platform",
-                "manylinux_2_17_x86_64",
-                "--platform",
-                "manylinux_2_28_x86_64",
-                "--platform",
-                "any",
                 package_spec,
             ]
 
