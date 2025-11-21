@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 Script to organize wheels by size for GitHub Pages (<100MB) and GitHub Releases (>100MB).
+Optimized for minimal disk space usage using move + symlinks.
 """
 
 import os
@@ -74,16 +75,19 @@ if total == 0:
 
 print(f"Found {total} wheels to process")
 
-# Check disk space
+# Check disk space (optimized calculation for move+symlink approach)
 total_wheel_size = sum(w.stat().st_size for w in all_wheels)
 stat = shutil.disk_usage(".")
 free_gb = stat.free / (1024**3)
-needed_gb = total_wheel_size / (1024**3) * 1.5  # 1.5x for safety margin
+
+# With move+symlink approach, we only need ~1.1x the wheel size
+# (not 1.5x or 2x, since we're moving not copying)
+needed_gb = total_wheel_size / (1024**3) * 1.1  # 1.1x for filesystem overhead
 
 print(f"\nDisk Space Check:")
 print(f"  Total wheel size: {total_wheel_size/(1024**3):.2f} GB")
 print(f"  Available space: {free_gb:.2f} GB")
-print(f"  Estimated needed: {needed_gb:.2f} GB")
+print(f"  Estimated needed: {needed_gb:.2f} GB (using move+symlink)")
 
 if free_gb < needed_gb:
     print(f"\nERROR: Insufficient disk space!", file=sys.stderr)
@@ -92,9 +96,9 @@ if free_gb < needed_gb:
 
 print("Disk space check: OK\n")
 
-# Copy and separate wheels (OPTIMIZED - single pass, no redundant copies)
+# Process wheels with OPTIMIZED approach: move + symlink
 print(f"{'='*70}")
-print("Processing and copying wheels...")
+print("Processing wheels (using move + symlink for space efficiency)...")
 print(f"{'='*70}\n")
 
 large_count = 0
@@ -109,21 +113,31 @@ for i, wheel in enumerate(all_wheels, 1):
         size = wheel.stat().st_size
         size_mb = size / (1024*1024)
 
-        # Determine destination(s) and copy
+        # Determine destination(s) and move/symlink
         if size > SIZE_LIMIT:
-            # Large wheels: only to packages-large/ (for GitHub Releases)
-            shutil.copy2(wheel, large_dir / wheel.name)
+            # Large wheels: MOVE to packages-large/ (frees space from artifacts/)
+            dest = large_dir / wheel.name
+            shutil.move(str(wheel), str(dest))
             large_count += 1
             large_total_size += size
-            destination = "packages-large/"
+            operation = "moved -> packages-large/"
         else:
-            # Small wheels: to BOTH packages/ (for GitHub Pages) AND packages-small/ (staging)
-            # Copy to both in single operation to avoid redundant second loop
-            shutil.copy2(wheel, packages_dir / wheel.name)
-            shutil.copy2(wheel, small_dir / wheel.name)
+            # Small wheels: MOVE to packages/, SYMLINK in packages-small/
+            # This uses only 1× space instead of 2×
+            primary_dest = packages_dir / wheel.name
+            symlink_dest = small_dir / wheel.name
+
+            # Move to primary location (packages/)
+            shutil.move(str(wheel), str(primary_dest))
+
+            # Create relative symlink in packages-small/
+            # Use relative path so symlink works regardless of absolute paths
+            relative_path = os.path.relpath(primary_dest, small_dir)
+            os.symlink(relative_path, symlink_dest)
+
             small_count += 1
             small_total_size += size
-            destination = "packages/ + packages-small/"
+            operation = "moved -> packages/ + symlinked -> packages-small/"
 
         # Enhanced progress indicator
         current_time = time.time()
@@ -147,7 +161,7 @@ for i, wheel in enumerate(all_wheels, 1):
             display_name = wheel.name[:50] + "..." if len(wheel.name) > 53 else wheel.name
 
             print(f"[{elapsed:.0f}s] {i}/{total} ({pct}%) | "
-                  f"{display_name} ({size_mb:.1f}MB) -> {destination} | "
+                  f"{display_name} ({size_mb:.1f}MB) | "
                   f"Rate: {rate:.2f}/s | ETA: {eta_seconds:.0f}s")
 
             last_progress_time = current_time
@@ -156,6 +170,13 @@ for i, wheel in enumerate(all_wheels, 1):
         print(f"WARNING: Failed to process {wheel.name}: {e}", file=sys.stderr)
 
 total_time = time.time() - start_time
+
+# Verify artifacts directory is now empty (all files moved)
+remaining_wheels = list(artifacts_dir.rglob("*.whl"))
+if remaining_wheels:
+    print(f"\nWARNING: {len(remaining_wheels)} wheels remain in artifacts/", file=sys.stderr)
+else:
+    print(f"\nArtifacts directory cleaned: all wheels moved successfully")
 
 # Summary
 print(f"\n{'='*70}")
@@ -166,6 +187,9 @@ print(f"  Large wheels (>100MB): {large_count} -> GitHub Releases ({large_total_
 print(f"  Small wheels (<100MB): {small_count} -> GitHub Pages ({small_total_size/(1024**2):.1f} MB)")
 print(f"Total processing time: {total_time:.1f} seconds")
 print(f"Average rate: {total/total_time:.2f} wheels/second")
+print(f"\nDisk space optimization: Using move+symlink approach")
+print(f"  Actual space used: ~{total_wheel_size/(1024**3):.2f} GB (not {total_wheel_size*2/(1024**3):.2f} GB)")
+print(f"  Space saved: ~{total_wheel_size/(1024**3):.2f} GB")
 print(f"{'='*70}\n")
 
 # List examples
@@ -180,8 +204,14 @@ small_sample = list(small_dir.glob("*.whl"))[:5]
 if small_sample:
     print(f"\nSmall wheels sample (showing 5 of {small_count}):")
     for w in small_sample:
-        size_mb = w.stat().st_size / (1024*1024)
-        print(f"  - {w.name} ({size_mb:.1f} MB)")
+        # Check if symlink
+        if w.is_symlink():
+            target = os.readlink(w)
+            size_mb = w.stat().st_size / (1024*1024)
+            print(f"  - {w.name} ({size_mb:.1f} MB) [symlink -> {target}]")
+        else:
+            size_mb = w.stat().st_size / (1024*1024)
+            print(f"  - {w.name} ({size_mb:.1f} MB)")
 
 # Set output for next steps
 release_tag = f"wheels-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
