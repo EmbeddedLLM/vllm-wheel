@@ -225,8 +225,7 @@ jobs:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, collect-dependency-wheels, build-vllm-wheel]
     if: always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true') && (github.event.inputs.debug_mode != 'true' || github.event.inputs.skip_to_job4 == 'true' || (needs.build-base-wheels.result == 'skipped' && needs.collect-dependency-wheels.result == 'skipped'))
-    runs-on:
-      labels: self-hosted
+    runs-on: ubuntu-latest-l
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
