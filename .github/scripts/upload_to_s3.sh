@@ -129,7 +129,6 @@ echo ""
 
 aws s3 sync "$WHEELS_DIR/" "s3://$S3_BUCKET/packages/" \
     --region "$AWS_REGION" \
-    --acl public-read \
     --content-type "application/octet-stream" \
     --cache-control "public, max-age=31536000" \
     --size-only \
@@ -157,7 +156,6 @@ echo ""
 # Index files should not be cached aggressively as they may update
 aws s3 sync "$INDEX_DIR/" "s3://$S3_BUCKET/" \
     --region "$AWS_REGION" \
-    --acl public-read \
     --content-type "text/html" \
     --cache-control "no-cache, no-store, must-revalidate" \
     --size-only \
