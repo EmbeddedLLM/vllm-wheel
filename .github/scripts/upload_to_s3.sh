@@ -174,7 +174,7 @@ echo ""
 log_info "Verifying uploads..."
 
 # Check a sample wheel
-SAMPLE_WHEEL=$(find "$WHEELS_DIR" -name "*.whl" -type f | head -1)
+SAMPLE_WHEEL=$(find "$WHEELS_DIR" -name "*.whl" -type f -print -quit)
 if [ -n "$SAMPLE_WHEEL" ]; then
     WHEEL_NAME=$(basename "$SAMPLE_WHEEL")
     if aws s3 ls "s3://$S3_BUCKET/packages/$WHEEL_NAME" &> /dev/null; then
