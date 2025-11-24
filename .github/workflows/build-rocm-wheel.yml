@@ -77,6 +77,16 @@ jobs:
           docker cp ${container_id}:/app/debs/. artifacts/base-wheels/
           docker rm ${container_id}
           ls -lh artifacts/base-wheels/
+      - name: Normalize base wheel versions
+        run: |
+          echo "Installing dependencies for normalization script..."
+          pip install packaging
+          echo ""
+          echo "Normalizing base wheel versions (removing +git... suffixes)..."
+          python .github/scripts/normalize_wheel_versions.py artifacts/base-wheels/
+          echo ""
+          echo "Normalized base wheels:"
+          ls -lh artifacts/base-wheels/
       - name: Export base Docker image for reuse
         run: |
           mkdir -p artifacts/docker-image
@@ -96,6 +106,7 @@ jobs:
           retention-days: 7
   collect-dependency-wheels:
     name: Collect Dependency Wheels from PyPI
+    needs: build-base-wheels
     if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -111,13 +122,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pip-tools packaging requests
+      - name: Download base wheels artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-base-wheels
+          path: base-wheels
+      - name: List downloaded base wheels
+        run: |
+          echo "Base wheels that will be used for dependency resolution:"
+          ls -lh base-wheels/
       - name: Download dependency wheels with version ranges
         run: |
           python .github/scripts/download_dependency_wheels.py \
             --requirements requirements/rocm.txt \
             --output-dir artifacts/dependency-wheels \
             --python-version ${{ github.event.inputs.python_version }} \
-            --max-versions 5
+            --max-versions 5 \
+            --base-wheels-dir base-wheels
       - name: List downloaded wheels
         run: |
           echo "Downloaded wheels:"
@@ -193,15 +214,32 @@ jobs:
         run: |
           gunzip -c artifacts/docker-image/rocm-base-image.tar.gz | docker load
           docker images rocm/vllm-dev:base
+      - name: Get latest vLLM release tag
+        id: vllm_version
+        run: |
+          echo "Fetching latest vLLM release from GitHub API..."
+          LATEST_TAG=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
+
+          if [ "$LATEST_TAG" = "null" ] || [ -z "$LATEST_TAG" ]; then
+            echo "ERROR: Could not fetch latest release tag"
+            echo "Falling back to main branch"
+            LATEST_TAG="main"
+          fi
+
+          echo "vLLM version to build: $LATEST_TAG"
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
       - name: Build and extract vLLM wheel using Dockerfile.rocm
         run: |
+          echo "Building vLLM wheel from official release: ${{ steps.vllm_version.outputs.tag }}"
           DOCKER_BUILDKIT=1 docker build \
             --file docker/Dockerfile.rocm \
             --target export_vllm \
             --output type=local,dest=dist \
             --build-arg BASE_IMAGE=rocm/vllm-dev:base \
             --build-arg ARG_PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
-            --build-arg REMOTE_VLLM=0 \
+            --build-arg REMOTE_VLLM=1 \
+            --build-arg VLLM_REPO=https://github.com/vllm-project/vllm.git \
+            --build-arg VLLM_BRANCH=${{ steps.vllm_version.outputs.tag }} \
             .
           ls -lh dist/
           ls -lh dist/*.whl
@@ -214,6 +252,16 @@ jobs:
             auditwheel repair --plat manylinux_2_28_x86_64 -w artifacts/vllm-wheel/ "$wheel" || \
             cp "$wheel" artifacts/vllm-wheel/
           done
+          ls -lh artifacts/vllm-wheel/
+      - name: Normalize vLLM wheel version
+        run: |
+          echo "Installing dependencies for normalization script..."
+          pip install packaging
+          echo ""
+          echo "Normalizing vLLM wheel version (removing +git... suffixes)..."
+          python .github/scripts/normalize_wheel_versions.py artifacts/vllm-wheel/
+          echo ""
+          echo "Normalized vLLM wheel:"
           ls -lh artifacts/vllm-wheel/
       - name: Upload vLLM wheel
         uses: actions/upload-artifact@v4
@@ -264,9 +312,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ github.event.inputs.python_version }}
-      - name: Install dumb-pypi
+      - name: Install dependencies
         run: |
-          pip install dumb-pypi
+          pip install awscli packaging
 
       - name: Debug artifacts structure
         run: |
@@ -303,220 +351,110 @@ jobs:
             exit 1
           fi
 
-      - name: Organize and separate wheels by size
-        id: separate_wheels
+      - name: Collect all wheels into single directory
+        id: collect_wheels
         timeout-minutes: 30
-        run: python3 .github/scripts/organize_wheels.py
+        run: |
+          echo "Collecting all wheels into single directory for S3 upload..."
+          mkdir -p all-wheels
 
-      - name: Create GitHub Release for large wheels
-        if: hashFiles('pypi-repo/packages-large/*.whl') != ''
+          # Find and copy all wheels from artifacts
+          find artifacts -name "*.whl" -type f -exec cp {} all-wheels/ \;
+
+          WHEEL_COUNT=$(ls all-wheels/*.whl 2>/dev/null | wc -l)
+          echo "Total wheels collected: $WHEEL_COUNT"
+
+          if [ "$WHEEL_COUNT" -eq 0 ]; then
+            echo "ERROR: No wheels found!"
+            exit 1
+          fi
+
+          # List some sample wheels
+          echo ""
+          echo "Sample wheels:"
+          ls -lh all-wheels/ | head -20
+
+          echo ""
+          echo "Total size:"
+          du -sh all-wheels/
+
+      - name: Generate PyPI index for S3
+        run: |
+          echo "Generating PyPI index for S3..."
+
+          # Set S3 URL
+          S3_URL="https://${{ secrets.AWS_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          echo "S3 URL: $S3_URL"
+
+          # Generate index using our script
+          python3 .github/scripts/generate_s3_index.py \
+            --wheels-dir all-wheels \
+            --output-dir pypi-index \
+            --s3-url "$S3_URL" \
+            --rocm-version "${{ github.event.inputs.rocm_version }}" \
+            --python-version "${{ github.event.inputs.python_version }}" \
+            --gpu-arch "${{ github.event.inputs.pytorch_rocm_arch }}" \
+            --vllm-version "latest official release"
+
+          echo ""
+          echo "Index structure:"
+          tree -L 2 pypi-index/ || find pypi-index/ -type d
+
+      - name: Configure AWS credentials
+        run: |
+          echo "Configuring AWS credentials..."
+          aws configure set aws_access_key_id "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          aws configure set default.region "${{ secrets.AWS_REGION }}"
+          echo "✅ AWS configured"
+
+      - name: Upload to S3
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          RELEASE_TAG="${{ steps.separate_wheels.outputs.release_tag }}"
-
-          # Create release
-          gh release create "$RELEASE_TAG" \
-            --repo ${{ github.repository }} \
-            --title "ROCm Wheels - $(date +%Y-%m-%d)" \
-            --notes "Large ML framework wheels for vLLM ROCm
-
-          ## Included Wheels
-          $(ls -1 pypi-repo/packages-large/)
-
-          ## Build Info
-          - ROCm Version: ${{ github.event.inputs.rocm_version }}
-          - Python Version: ${{ github.event.inputs.python_version }}
-          - GPU Architectures: ${{ github.event.inputs.pytorch_rocm_arch }}
-          - Commit: ${{ github.sha }}
-
-          ## Installation
-          These wheels are automatically referenced by the PyPI index at:
-          https://${{ github.repository_owner }}.github.io/vllm-rocm/simple/
-
-          Use: \`pip install vllm-rocm --index-url https://${{ github.repository_owner }}.github.io/vllm-rocm/simple/\`"
-
-          # Upload large wheels to release
-          gh release upload "$RELEASE_TAG" pypi-repo/packages-large/*.whl \
-            --repo ${{ github.repository }} \
-            --clobber
-
-      - name: Generate custom PyPI index with mixed URLs
-        run: |
-          cd pypi-repo
-
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/vllm-rocm"
-          RELEASE_TAG="${{ steps.separate_wheels.outputs.release_tag }}"
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
-
-          # Create simple directory structure
-          mkdir -p simple
-
-          # Generate index for each package
-          for wheel in packages-small/*.whl packages-large/*.whl; do
-            [ -f "$wheel" ] || continue
-
-            # Extract package name (convert underscores/hyphens to lowercase, remove version)
-            wheel_name=$(basename "$wheel")
-            pkg_name=$(echo "$wheel_name" | sed -E 's/(-|_)[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
-
-            mkdir -p "simple/$pkg_name"
-
-            # Determine URL based on size
-            if [ -f "packages-large/$(basename $wheel)" ]; then
-              wheel_url="$RELEASE_URL/$(basename $wheel)"
-            else
-              wheel_url="$PAGES_URL/packages/$(basename $wheel)"
-            fi
-
-            # Create/append to package index
-            echo "<a href=\"$wheel_url\">$(basename $wheel)</a><br/>" >> "simple/$pkg_name/index.html"
-          done
-
-          # Create main simple index
-          cat > simple/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html><head><title>Simple Index</title></head><body>
-          EOF
-
-          for pkg_dir in simple/*/; do
-            [ -d "$pkg_dir" ] || continue
-            pkg_name=$(basename "$pkg_dir")
-            echo "<a href=\"$pkg_name/\">$pkg_name</a><br/>" >> simple/index.html
-          done
-
-          echo "</body></html>" >> simple/index.html
-
-          # Move small wheels to packages directory for Pages
-          rm -rf packages
-          mv packages-small packages
-          rm -rf packages-large
-
-          echo "✅ PyPI index structure created"
-          tree -L 2 || find . -type d
-      - name: Create landing page
-        run: |
-          cd pypi-repo
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/vllm-rocm"
-          RELEASE_TAG="${{ steps.separate_wheels.outputs.release_tag }}"
-          cat > index.html << EOF
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>vLLM ROCm PyPI Repository</title>
-              <style>
-                  body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-                  code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
-                  pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
-                  .info { background: #e7f3ff; padding: 10px; border-left: 4px solid #2196F3; margin: 15px 0; }
-              </style>
-          </head>
-          <body>
-              <h1>vLLM ROCm PyPI Repository</h1>
-              <p>This is a custom PyPI repository for vLLM with ROCm support and all dependencies.</p>
-              <div class="info">
-                  <strong>📦 Hybrid Storage:</strong> Small wheels (&lt;100MB) are hosted on GitHub Pages,
-                  while large wheels (PyTorch, Triton) are hosted on GitHub Releases for better performance.
-              </div>
-              <h2>Installation</h2>
-              <pre><code>pip install vllm-rocm --index-url ${PAGES_URL}/simple/</code></pre>
-              <h2>Available Packages</h2>
-              <p><a href="simple/">Browse packages</a></p>
-              <h2>Build Information</h2>
-              <ul>
-                  <li>ROCm Version: ${{ github.event.inputs.rocm_version }}</li>
-                  <li>Python Version: ${{ github.event.inputs.python_version }}</li>
-                  <li>GPU Architectures: ${{ github.event.inputs.pytorch_rocm_arch }}</li>
-                  <li>Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")</li>
-                  <li>Commit: ${{ github.sha }}</li>
-                  <li>Release Tag: ${RELEASE_TAG}</li>
-              </ul>
-              <h2>Resources</h2>
-              <ul>
-                  <li><a href="https://github.com/${{ github.repository }}">Source Repository</a></li>
-                  <li><a href="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}">Latest Release</a></li>
-              </ul>
-          </body>
-          </html>
-          EOF
-
-      - name: Try to checkout gh-pages branch
-        id: checkout_gh_pages
-        continue-on-error: true
-        run: |
-          git fetch origin gh-pages:gh-pages 2>/dev/null || true
-          if git show-ref --verify --quiet refs/heads/gh-pages; then
-            git checkout gh-pages
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Setup gh-pages directory
-        run: |
-          if [ "${{ steps.checkout_gh_pages.outputs.exists }}" = "true" ]; then
-            echo "Updating existing gh-pages branch"
-            # Keep .git directory, remove everything else
-            find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name 'pypi-repo' -exec rm -rf {} +
-          else
-            echo "Creating new gh-pages branch"
-            git checkout --orphan gh-pages
-            git rm -rf . 2>/dev/null || true
-          fi
-
-          # Copy PyPI repository contents to root
-          cp -r pypi-repo/* .
-          rm -rf pypi-repo
-
-          # Create .nojekyll to disable Jekyll processing
-          touch .nojekyll
-
-          echo "✅ gh-pages directory prepared"
-          ls -la
-
-      - name: Commit and push to gh-pages
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add .
-          git commit -m "Publish PyPI repository - $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-
-          Build configuration:
-          - ROCm: ${{ github.event.inputs.rocm_version }}
-          - Python: ${{ github.event.inputs.python_version }}
-          - GPU Arch: ${{ github.event.inputs.pytorch_rocm_arch }}
-          - Commit: ${{ github.sha }}
-          - Release: ${{ steps.separate_wheels.outputs.release_tag }}" || echo "No changes to commit"
-
-          git push origin gh-pages --force
-
-          echo "✅ PyPI repository published to GitHub Pages"
+          bash .github/scripts/upload_to_s3.sh \
+            all-wheels \
+            pypi-index \
+            "${{ secrets.AWS_S3_BUCKET }}" \
+            "${{ secrets.AWS_REGION }}"
 
       - name: Summary
         run: |
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/vllm-rocm"
-          RELEASE_TAG="${{ steps.separate_wheels.outputs.release_tag }}"
+          S3_URL="https://${{ secrets.AWS_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com"
+          WHEEL_COUNT=$(ls all-wheels/*.whl 2>/dev/null | wc -l)
+
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ PyPI repository published successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "✅ vLLM ROCm wheels published successfully to S3!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎉 Ready to Use!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Command" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "pip install vllm-rocm --index-url ${PAGES_URL}/simple/" >> $GITHUB_STEP_SUMMARY
+          echo "pip install vllm --index-url ${S3_URL}/simple/" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Or install all packages explicitly:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "pip install torch triton torchvision vllm --index-url ${S3_URL}/simple/" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- ROCm Version: ${{ github.event.inputs.rocm_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Python Version: ${{ github.event.inputs.python_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- GPU Architectures: ${{ github.event.inputs.pytorch_rocm_arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Total Wheels: $(find . -name "*.whl" 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **ROCm Version**: ${{ github.event.inputs.rocm_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python Version**: ${{ github.event.inputs.python_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **GPU Architectures**: ${{ github.event.inputs.pytorch_rocm_arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **vLLM Version**: Latest official release" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Wheels**: $WHEEL_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Storage Strategy" >> $GITHUB_STEP_SUMMARY
-          echo "- Small wheels (&lt;100MB): GitHub Pages" >> $GITHUB_STEP_SUMMARY
-          echo "- Large wheels (&gt;100MB): GitHub Releases" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository Home**: ${S3_URL}/" >> $GITHUB_STEP_SUMMARY
+          echo "- **PyPI Index**: ${S3_URL}/simple/" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: ${{ secrets.AWS_S3_BUCKET }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository Home**: ${PAGES_URL}/" >> $GITHUB_STEP_SUMMARY
-          echo "- **PyPI Index**: ${PAGES_URL}/simple/" >> $GITHUB_STEP_SUMMARY
-          echo "- **GitHub Release**: https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "### 💾 Storage" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage**: AWS S3" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ secrets.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **All wheels hosted on S3** (no size limits, better performance)" >> $GITHUB_STEP_SUMMARY

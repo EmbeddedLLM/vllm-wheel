@@ -11,6 +11,8 @@ by downloading multiple compatible versions.
 import argparse
 import subprocess
 import sys
+import tempfile
+import os
 from pathlib import Path
 
 import requests
@@ -224,6 +226,147 @@ def process_requirement(
         print(f"Error processing requirement '{req_string}': {e}", file=sys.stderr)
 
 
+def download_with_base_wheels(
+    requirements_file: Path,
+    base_wheels_dir: Path,
+    output_dir: Path,
+    python_version: str,
+) -> None:
+    """
+    Download dependencies after installing base wheels to ensure correct resolution.
+
+    This is critical because:
+    1. Base wheels (torch, triton, etc.) are ROCm builds, not from PyPI
+    2. When pip resolves dependencies, it needs the actual torch installed
+    3. Otherwise pip might try to install CUDA-compatible versions from PyPI
+
+    Strategy:
+    1. Create a temporary virtual environment
+    2. Install base wheels (torch, triton, torchvision, amdsmi) into it
+    3. Run pip download from within that environment
+    4. pip will now resolve dependencies compatible with YOUR torch version
+
+    Args:
+        requirements_file: Path to requirements.txt
+        base_wheels_dir: Directory containing pre-built base wheels
+        output_dir: Where to save downloaded wheels
+        python_version: Python version string (for logging)
+    """
+    print("=" * 70)
+    print("DOWNLOADING DEPENDENCIES WITH BASE WHEELS INSTALLED")
+    print("=" * 70)
+    print(f"Strategy: Install base wheels first, then download dependencies")
+    print(f"This ensures all dependencies are compatible with ROCm torch")
+    print()
+
+    # Find base wheels
+    base_wheels = list(base_wheels_dir.glob("*.whl"))
+    if not base_wheels:
+        print(f"ERROR: No wheels found in {base_wheels_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(base_wheels)} base wheel(s):")
+    for wheel in base_wheels:
+        size_mb = wheel.stat().st_size / (1024 * 1024)
+        print(f"  - {wheel.name} ({size_mb:.1f} MB)")
+    print()
+
+    # Create temporary venv
+    print("Creating temporary virtual environment...")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        venv_dir = Path(tmpdir) / "venv"
+
+        # Create venv using current Python
+        print(f"  venv location: {venv_dir}")
+        result = subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_dir)],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            print(f"ERROR: Failed to create venv", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            sys.exit(1)
+
+        print("  ✓ Virtual environment created")
+
+        # Determine pip path in venv
+        if os.name == 'nt':  # Windows
+            pip_path = venv_dir / "Scripts" / "pip"
+        else:  # Unix/Linux
+            pip_path = venv_dir / "bin" / "pip"
+
+        # Upgrade pip in venv
+        print("  Upgrading pip in venv...")
+        subprocess.run(
+            [str(pip_path), "install", "--upgrade", "pip"],
+            capture_output=True,
+            check=True,
+        )
+        print("  ✓ pip upgraded")
+
+        # Install base wheels into venv (without dependencies)
+        print()
+        print("Installing base wheels into venv (this may take a few minutes)...")
+        for wheel in base_wheels:
+            print(f"  Installing {wheel.name}...")
+            result = subprocess.run(
+                [str(pip_path), "install", "--no-deps", str(wheel)],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                print(f"  WARNING: Failed to install {wheel.name}", file=sys.stderr)
+                print(result.stderr, file=sys.stderr)
+            else:
+                print(f"  ✓ {wheel.name} installed")
+
+        print()
+        print("Base wheels installed successfully!")
+        print()
+
+        # Now download dependencies using the venv's pip
+        # This ensures pip resolves against the installed ROCm torch
+        print("Downloading dependencies (this will take several minutes)...")
+        print(f"  Requirements: {requirements_file}")
+        print(f"  Output: {output_dir}")
+        print()
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Run pip download from venv
+        # This will resolve dependencies based on the installed torch
+        cmd = [
+            str(pip_path),
+            "download",
+            "-r", str(requirements_file),
+            "--dest", str(output_dir),
+            "--prefer-binary",
+        ]
+
+        print(f"Running: {' '.join(str(c) for c in cmd)}")
+        print()
+
+        result = subprocess.run(
+            cmd,
+            capture_output=False,  # Show output in real-time
+            text=True,
+        )
+
+        if result.returncode != 0:
+            print(f"\nERROR: Dependency download failed!", file=sys.stderr)
+            sys.exit(1)
+
+        print()
+        print("✓ Dependencies downloaded successfully!")
+
+    # venv is automatically cleaned up when exiting the context manager
+    print("✓ Temporary venv cleaned up")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -248,6 +391,13 @@ def main():
         default=3,
         help="Maximum versions to download per package (default: 3)",
     )
+    parser.add_argument(
+        "--base-wheels-dir",
+        type=Path,
+        required=False,
+        help="Directory containing pre-built base wheels (torch, triton, etc.). "
+             "If provided, these will be installed first to ensure correct dependency resolution.",
+    )
 
     args = parser.parse_args()
 
@@ -259,11 +409,43 @@ def main():
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process each requirement
-    for req_string in requirements:
-        process_requirement(
-            req_string, args.output_dir, args.python_version, args.max_versions
+    # Check if base-wheels-dir was provided
+    if args.base_wheels_dir:
+        # NEW APPROACH: Install base wheels first, then download dependencies
+        # This ensures correct dependency resolution for ROCm builds
+        print()
+        print("=" * 70)
+        print("Using BASE WHEELS strategy for dependency resolution")
+        print("=" * 70)
+        print()
+
+        if not args.base_wheels_dir.exists():
+            print(f"ERROR: Base wheels directory not found: {args.base_wheels_dir}", file=sys.stderr)
+            sys.exit(1)
+
+        download_with_base_wheels(
+            args.requirements,
+            args.base_wheels_dir,
+            args.output_dir,
+            args.python_version,
         )
+    else:
+        # OLD APPROACH: Download dependencies without base wheels
+        # This may result in incomplete transitive dependency resolution
+        print()
+        print("=" * 70)
+        print("Using STANDARD strategy (no base wheels)")
+        print("=" * 70)
+        print("NOTE: This may result in incomplete transitive dependencies.")
+        print("For best results, use --base-wheels-dir option.")
+        print("=" * 70)
+        print()
+
+        # Process each requirement
+        for req_string in requirements:
+            process_requirement(
+                req_string, args.output_dir, args.python_version, args.max_versions
+            )
 
     # Summary
     wheels = list(args.output_dir.glob("*.whl"))
