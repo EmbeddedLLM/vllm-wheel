@@ -154,7 +154,7 @@ echo ""
 
 # Upload index with different cache settings
 # Index files should not be cached aggressively as they may update
-aws s3 sync "$INDEX_DIR/" "s3://$S3_BUCKET/" \
+aws s3 sync "$INDEX_DIR/" "s3://$S3_BUCKET/simple/" \
     --region "$AWS_REGION" \
     --content-type "text/html" \
     --cache-control "no-cache, no-store, must-revalidate" \
@@ -214,6 +214,6 @@ echo "📥 Installation Command:"
 echo "  pip install vllm --index-url $INSTALL_URL"
 echo ""
 echo "💡 Test installation with:"
-echo "  docker run -it python:3.12-slim bash -c 'pip install vllm --index-url $INSTALL_URL && python -c \"import vllm; print(vllm.__version__)\""'"
+echo "  docker run -it python:3.12-slim bash -c 'pip install vllm --index-url $INSTALL_URL && python -c \"import vllm; print(vllm.__version__)\"'"
 echo ""
 echo "============================================================================"
