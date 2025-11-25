@@ -395,7 +395,8 @@ jobs:
             --rocm-version "${{ github.event.inputs.rocm_version }}" \
             --python-version "${{ github.event.inputs.python_version }}" \
             --gpu-arch "${{ github.event.inputs.pytorch_rocm_arch }}" \
-            --vllm-version "latest official release"
+            --vllm-version "latest official release" \
+            --no-metadata
 
           echo ""
           echo "Index structure:"
