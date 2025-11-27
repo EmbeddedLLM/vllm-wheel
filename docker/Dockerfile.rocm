@@ -65,49 +65,12 @@ RUN cd ${COMMON_WORKDIR}/vllm && python3 -m pip install dist/*.whl
 # Export dependency tree
 RUN pipdeptree --freeze > ${COMMON_WORKDIR}/all-dependencies.txt
 
-# Filter out system packages that shouldn't be in PyPI repository
-RUN cat > /tmp/filter_deps.py << 'EOFPYTHON' && python3 /tmp/filter_deps.py
-import subprocess
-import re
-import sys
-
-# Known system packages to exclude (pre-installed in base ROCm image)
-SYSTEM_PACKAGES = {
-    'dbus-python', 'pygobject', 'pycairo',
-    'distro', 'secretstorage', 'jeepney'
-}
-
-with open('/app/all-dependencies.txt') as f:
-    deps = f.readlines()
-
-filtered = []
-for line in deps:
-    match = re.match(r'^([a-zA-Z0-9_-]+)', line)
-    if not match:
-        continue
-    pkg = match.group(1).lower()
-
-    # Exclude blacklisted packages
-    if pkg in SYSTEM_PACKAGES:
-        print(f"Excluding blacklisted: {line.strip()}", file=sys.stderr)
-        continue
-
-    # Check installation location to exclude system-installed packages
-    try:
-        result = subprocess.run(['pip', 'show', pkg],
-                              capture_output=True, text=True)
-        if '/dist-packages' in result.stdout:
-            print(f"Excluding system location: {line.strip()}", file=sys.stderr)
-            continue
-    except:
-        pass
-
-    filtered.append(line)
-
-with open('/app/all-dependencies.txt', 'w') as f:
-    f.writelines(filtered)
-print(f"Filtered {len(deps)} -> {len(filtered)} dependencies", file=sys.stderr)
-EOFPYTHON
+# Copy filtering script and run it
+COPY .github/scripts/filter_system_packages.py /tmp/filter_system_packages.py
+RUN python3 /tmp/filter_system_packages.py \
+    ${COMMON_WORKDIR}/all-dependencies.txt \
+    ${COMMON_WORKDIR}/all-dependencies-filtered.txt \
+    && mv ${COMMON_WORKDIR}/all-dependencies-filtered.txt ${COMMON_WORKDIR}/all-dependencies.txt
 
 # Show what we collected
 RUN echo "Collected dependencies (after filtering):" && cat ${COMMON_WORKDIR}/all-dependencies.txt
