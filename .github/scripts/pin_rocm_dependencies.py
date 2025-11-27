@@ -47,13 +47,14 @@ def get_custom_wheel_versions(install_dir: str) -> Dict[str, str]:
 
     versions = {}
 
-    # Map wheel prefixes to package names (handle triton_kernels separately)
+    # Map wheel prefixes to package names
+    # IMPORTANT: Use dashes to avoid matching substrings (e.g., 'torch' would match 'torchvision')
     package_mapping = {
-        'torch': 'torch',
-        'triton-': 'triton',  # Use dash to avoid matching triton_kernels
-        'triton_kernels': 'triton-kernels',
-        'torchvision': 'torchvision',
-        'amdsmi': 'amdsmi',
+        'torch-': 'torch',                    # Match torch- (not torchvision)
+        'triton-': 'triton',                  # Match triton- (not triton_kernels)
+        'triton_kernels-': 'triton-kernels',  # Match triton_kernels-
+        'torchvision-': 'torchvision',        # Match torchvision-
+        'amdsmi-': 'amdsmi',                  # Match amdsmi-
     }
 
     for wheel_file in install_path.glob('*.whl'):

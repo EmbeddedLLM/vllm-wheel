@@ -57,8 +57,9 @@ COPY .github/scripts/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py
 RUN python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/requirements/rocm.txt
 
 # Build vLLM
+# Use --find-links to search /install for custom ROCm wheels before PyPI
 RUN cd vllm \
-    && python3 -m pip install -r requirements/rocm.txt \
+    && python3 -m pip install --find-links /install -r requirements/rocm.txt \
     && python3 setup.py clean --all  \
     && python3 setup.py bdist_wheel --dist-dir=dist
 FROM build_vllm AS collect_dependencies
