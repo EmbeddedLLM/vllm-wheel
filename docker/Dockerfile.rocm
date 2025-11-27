@@ -71,10 +71,30 @@ RUN echo "Collected dependencies:" && cat ${COMMON_WORKDIR}/all-dependencies.txt
 # Verify custom ROCm wheels are available at /install
 RUN echo "Custom ROCm wheels at /install:" && ls -lh /install/
 
-# Download all dependency wheels
+# Split dependencies into git and regular
+RUN grep '^[^@]*@ git+' ${COMMON_WORKDIR}/all-dependencies.txt > ${COMMON_WORKDIR}/git-dependencies.txt || true
+RUN grep -v '^[^@]*@ git+' ${COMMON_WORKDIR}/all-dependencies.txt > ${COMMON_WORKDIR}/regular-dependencies.txt || true
+
+# Show what we're processing
+RUN echo "Git dependencies to build:" && cat ${COMMON_WORKDIR}/git-dependencies.txt || echo "None"
+RUN echo "Regular dependencies to download:" && cat ${COMMON_WORKDIR}/regular-dependencies.txt
+
+# Create dependency wheels directory
+RUN mkdir -p ${COMMON_WORKDIR}/dependency-wheels
+
+# Build git dependencies as wheels (if any)
+RUN if [ -s ${COMMON_WORKDIR}/git-dependencies.txt ]; then \
+      echo "Building git dependencies as wheels..." && \
+      pip wheel -r ${COMMON_WORKDIR}/git-dependencies.txt \
+        -w ${COMMON_WORKDIR}/dependency-wheels/ \
+        --no-deps; \
+    else \
+      echo "No git dependencies to build"; \
+    fi
+
+# Download regular dependencies
 # pip will use wheels from /install (referenced in pipdeptree output)
-RUN mkdir -p ${COMMON_WORKDIR}/dependency-wheels && \
-    pip download -r ${COMMON_WORKDIR}/all-dependencies.txt \
+RUN pip download -r ${COMMON_WORKDIR}/regular-dependencies.txt \
     -d ${COMMON_WORKDIR}/dependency-wheels/ \
     --only-binary=:all:
 

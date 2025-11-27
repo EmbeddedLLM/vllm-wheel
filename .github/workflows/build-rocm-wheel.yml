@@ -249,6 +249,13 @@ jobs:
           name: vllm-wheel
           path: artifacts/vllm-wheel
 
+      - name: Download dependency wheels from current run (debug mode)
+        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-wheels
+          path: artifacts/dependency-wheels
+
       - name: Download all artifacts (skip to job 4 mode - from previous run only)
         if: github.event.inputs.skip_to_job4 == 'true'
         uses: actions/download-artifact@v4
