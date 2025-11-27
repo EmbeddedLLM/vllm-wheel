@@ -14,6 +14,10 @@ on:
         description: 'ROCm version'
         required: false
         default: '7.1'
+      vllm_version:
+        description: 'vLLM version (tag like v0.11.2 or branch like main, or "latest" for auto-fetch)'
+        required: false
+        default: 'latest'
       debug_mode:
         description: 'Debug mode: skip Jobs 1&2, reuse artifacts from previous run'
         required: false
@@ -134,20 +138,27 @@ jobs:
         run: |
           gunzip -c artifacts/docker-image/rocm-base-image.tar.gz | docker load
           docker images rocm/vllm-dev:base
-      - name: Get latest vLLM release tag
+      - name: Get vLLM version
         id: vllm_version
         run: |
-          echo "Fetching latest vLLM release from GitHub API..."
-          LATEST_TAG=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
+          INPUT_VERSION="${{ github.event.inputs.vllm_version }}"
 
-          if [ "$LATEST_TAG" = "null" ] || [ -z "$LATEST_TAG" ]; then
-            echo "ERROR: Could not fetch latest release tag"
-            echo "Falling back to main branch"
-            LATEST_TAG="main"
+          if [ "$INPUT_VERSION" = "latest" ] || [ -z "$INPUT_VERSION" ]; then
+            echo "Fetching latest vLLM release from GitHub API..."
+            VLLM_VERSION=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
+
+            if [ "$VLLM_VERSION" = "null" ] || [ -z "$VLLM_VERSION" ]; then
+              echo "ERROR: Could not fetch latest release tag"
+              echo "Falling back to main branch"
+              VLLM_VERSION="main"
+            fi
+          else
+            echo "Using specified version: $INPUT_VERSION"
+            VLLM_VERSION="$INPUT_VERSION"
           fi
 
-          echo "vLLM version to build: $LATEST_TAG"
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "vLLM version to build: $VLLM_VERSION"
+          echo "tag=$VLLM_VERSION" >> $GITHUB_OUTPUT
       - name: Build and extract vLLM wheel using Dockerfile.rocm
         run: |
           echo "Building vLLM wheel from official release: ${{ steps.vllm_version.outputs.tag }}"
@@ -330,7 +341,7 @@ jobs:
             --rocm-version "${{ github.event.inputs.rocm_version }}" \
             --python-version "${{ github.event.inputs.python_version }}" \
             --gpu-arch "${{ github.event.inputs.pytorch_rocm_arch }}" \
-            --vllm-version "latest official release" \
+            --vllm-version "${{ github.event.inputs.vllm_version }}" \
             --no-metadata
 
           echo ""
@@ -381,7 +392,7 @@ jobs:
           echo "- **ROCm Version**: ${{ github.event.inputs.rocm_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Python Version**: ${{ github.event.inputs.python_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **GPU Architectures**: ${{ github.event.inputs.pytorch_rocm_arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **vLLM Version**: Latest official release" >> $GITHUB_STEP_SUMMARY
+          echo "- **vLLM Version**: ${{ github.event.inputs.vllm_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Total Wheels**: $WHEEL_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

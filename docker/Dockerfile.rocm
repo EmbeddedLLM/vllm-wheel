@@ -39,8 +39,15 @@ ARG VLLM_REPO="https://github.com/vllm-project/vllm.git"
 ARG VLLM_BRANCH="main"
 ONBUILD RUN git clone ${VLLM_REPO} \
 	    && cd vllm \
-	    && git fetch -v --prune -- origin ${VLLM_BRANCH} \
-	    && git checkout FETCH_HEAD \
+	    && git fetch -v --prune --tags origin \
+	    && if git show-ref --verify --quiet refs/tags/${VLLM_BRANCH}; then \
+	           echo "Checking out tag: ${VLLM_BRANCH}" && \
+	           git checkout tags/${VLLM_BRANCH}; \
+	       else \
+	           echo "Checking out branch: ${VLLM_BRANCH}" && \
+	           git fetch -v --prune -- origin ${VLLM_BRANCH} && \
+	           git checkout FETCH_HEAD; \
+	       fi \
         && if [ ${VLLM_REPO} != "https://github.com/vllm-project/vllm.git" ] ; then \
                git remote add upstream "https://github.com/vllm-project/vllm.git" \
                && git fetch upstream ; fi
@@ -123,7 +130,8 @@ RUN if [ -s ${COMMON_WORKDIR}/git-dependencies.txt ]; then \
 
 # Download regular dependencies
 # pip will use wheels from /install (referenced in pipdeptree output)
-RUN pip download -r ${COMMON_WORKDIR}/regular-dependencies.txt \
+# --find-links ensures pip can find custom wheels when resolving vllm's dependencies
+RUN pip download --find-links /install -r ${COMMON_WORKDIR}/regular-dependencies.txt \
     -d ${COMMON_WORKDIR}/dependency-wheels/ \
     --only-binary=:all:
 
