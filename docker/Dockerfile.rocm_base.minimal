@@ -40,6 +40,11 @@ RUN apt-get update -y \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
     && python3 --version && python3 -m pip --version
 
+# Remove old distutils-installed packages from shared locations (Python 3.10 remnants)
+RUN rm -rf /usr/lib/python3/dist-packages/blinker* \
+    /usr/local/lib/python3.*/dist-packages/blinker* \
+    /usr/lib/python3.*/dist-packages/blinker* || true
+
 RUN pip install -U packaging 'cmake<4' ninja wheel 'setuptools<80' pybind11 Cython blinker==1.9.0
 
 FROM base AS build_triton

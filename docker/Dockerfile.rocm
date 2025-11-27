@@ -57,7 +57,7 @@ RUN cd vllm \
 FROM build_vllm AS collect_dependencies
 ARG COMMON_WORKDIR
 # Install pipdeptree for dependency analysis
-RUN python3 -m pip install pipdeptree blinker==1.9.0
+RUN python3 -m pip install pipdeptree
 
 # Install all built wheels into the environment
 RUN cd ${COMMON_WORKDIR}/vllm && python3 -m pip install dist/*.whl
