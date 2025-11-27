@@ -54,7 +54,7 @@ FROM fetch_vllm AS build_vllm
 # This ensures 'pip install vllm' automatically installs correct torch/triton/torchvision/amdsmi
 ARG COMMON_WORKDIR
 COPY .github/scripts/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py
-RUN python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/pyproject.toml
+RUN python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/requirements/rocm.txt
 
 # Build vLLM
 RUN cd vllm \
