@@ -49,6 +49,13 @@ FROM fetch_vllm_${REMOTE_VLLM} AS fetch_vllm
 # -----------------------
 # vLLM build stages
 FROM fetch_vllm AS build_vllm
+
+# Pin vLLM dependencies to exact versions of custom ROCm wheels
+# This ensures 'pip install vllm' automatically installs correct torch/triton/torchvision/amdsmi
+ARG COMMON_WORKDIR
+COPY .github/scripts/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py
+RUN python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/pyproject.toml
+
 # Build vLLM
 RUN cd vllm \
     && python3 -m pip install -r requirements/rocm.txt \
@@ -74,9 +81,17 @@ RUN python3 /tmp/filter_system_packages.py \
 
 # Remove custom wheels from dependency list (already collected separately)
 # This prevents pip from downloading different versions from PyPI
-RUN grep -v -E '^(torch|triton|triton-kernels|triton_kernels|torchvision|amdsmi|vllm)(@| ==|-)' \
-    ${COMMON_WORKDIR}/all-dependencies.txt > ${COMMON_WORKDIR}/all-dependencies-no-custom.txt || true
-RUN mv ${COMMON_WORKDIR}/all-dependencies-no-custom.txt ${COMMON_WORKDIR}/all-dependencies.txt
+# We check what's actually in /install and filter those packages dynamically
+RUN echo "Filtering out custom wheels from dependency list..." && \
+    cp ${COMMON_WORKDIR}/all-dependencies.txt ${COMMON_WORKDIR}/all-dependencies-no-custom.txt && \
+    for wheel in /install/*.whl; do \
+        pkg_name=$(basename "$wheel" | cut -d'-' -f1 | tr '_' '-'); \
+        echo "  Excluding $pkg_name from dependencies"; \
+        grep -v -E "^${pkg_name}(@| ==|==)" ${COMMON_WORKDIR}/all-dependencies-no-custom.txt > ${COMMON_WORKDIR}/all-dependencies-tmp.txt || true; \
+        mv ${COMMON_WORKDIR}/all-dependencies-tmp.txt ${COMMON_WORKDIR}/all-dependencies-no-custom.txt; \
+    done && \
+    grep -v -E '^vllm(@| ==|==)' ${COMMON_WORKDIR}/all-dependencies-no-custom.txt > ${COMMON_WORKDIR}/all-dependencies-tmp.txt || true && \
+    mv ${COMMON_WORKDIR}/all-dependencies-tmp.txt ${COMMON_WORKDIR}/all-dependencies.txt
 
 # Show what we collected
 RUN echo "Collected dependencies (after filtering custom wheels):" && cat ${COMMON_WORKDIR}/all-dependencies.txt
