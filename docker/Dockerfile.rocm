@@ -135,8 +135,23 @@ RUN pip download --find-links /install -r ${COMMON_WORKDIR}/regular-dependencies
     -d ${COMMON_WORKDIR}/dependency-wheels/ \
     --only-binary=:all:
 
-# Show downloaded wheels
-RUN echo "Downloaded dependency wheels:" && ls -lh ${COMMON_WORKDIR}/dependency-wheels/
+# Remove any PyPI versions of custom packages that might have been downloaded
+# This ensures we only use our custom ROCm wheels, not PyPI versions
+RUN echo "Removing any PyPI versions of custom packages..." && \
+    rm -f ${COMMON_WORKDIR}/dependency-wheels/torch-*.whl \
+          ${COMMON_WORKDIR}/dependency-wheels/triton-*.whl \
+          ${COMMON_WORKDIR}/dependency-wheels/triton_kernels-*.whl \
+          ${COMMON_WORKDIR}/dependency-wheels/torchvision-*.whl \
+          ${COMMON_WORKDIR}/dependency-wheels/amdsmi-*.whl || true
+
+# Copy custom ROCm wheels to dependency-wheels directory
+# This ensures all wheels (custom + dependencies) are in one place for upload
+RUN echo "Copying custom ROCm wheels to dependency-wheels..." && \
+    cp /install/*.whl ${COMMON_WORKDIR}/dependency-wheels/ && \
+    echo "Custom wheels copied:" && ls -lh /install/
+
+# Show final wheel collection
+RUN echo "Final dependency wheels (with custom ROCm wheels):" && ls -lh ${COMMON_WORKDIR}/dependency-wheels/
 
 FROM scratch AS export_vllm
 ARG COMMON_WORKDIR
