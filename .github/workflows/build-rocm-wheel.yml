@@ -324,6 +324,11 @@ jobs:
           echo "Total size:"
           du -sh all-wheels/
 
+      - name: Remove PyPI duplicates of custom ROCm packages
+        run: |
+          chmod +x .github/scripts/cleanup_pypi_duplicates.sh
+          .github/scripts/cleanup_pypi_duplicates.sh artifacts/base-wheels all-wheels
+
       - name: Generate PyPI index for S3
         run: |
           echo "Generating PyPI index for S3..."
