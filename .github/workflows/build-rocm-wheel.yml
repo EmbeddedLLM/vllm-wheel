@@ -68,8 +68,8 @@ jobs:
           docker buildx build \
             --file docker/Dockerfile.rocm_base.minimal \
             --tag rocm/vllm-dev:base \
-            --build-arg PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
-            --build-arg PYTHON_VERSION=${{ github.event.inputs.python_version }} \
+            --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
+            --build-arg PYTHON_VERSION="${{ github.event.inputs.python_version }}" \
             --load \
             .
       - name: Build debs stage for wheel extraction
@@ -78,8 +78,8 @@ jobs:
             --file docker/Dockerfile.rocm_base.minimal \
             --tag rocm-base-debs:local \
             --target debs \
-            --build-arg PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
-            --build-arg PYTHON_VERSION=${{ github.event.inputs.python_version }} \
+            --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
+            --build-arg PYTHON_VERSION="${{ github.event.inputs.python_version }}" \
             --load \
             .
       - name: Extract wheels from Docker image
@@ -167,10 +167,10 @@ jobs:
             --target export_vllm \
             --output type=local,dest=dist \
             --build-arg BASE_IMAGE=rocm/vllm-dev:base \
-            --build-arg ARG_PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
+            --build-arg ARG_PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
             --build-arg REMOTE_VLLM=1 \
             --build-arg VLLM_REPO=https://github.com/vllm-project/vllm.git \
-            --build-arg VLLM_BRANCH=${{ steps.vllm_version.outputs.tag }} \
+            --build-arg VLLM_BRANCH="${{ steps.vllm_version.outputs.tag }}" \
             .
           ls -lh dist/
           ls -lh dist/*.whl
