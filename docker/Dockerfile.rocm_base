@@ -126,16 +126,6 @@ RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
 RUN --mount=type=bind,from=build_aiter,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
 
-FROM base AS wheels_release_final
-# Copy wheels to permanent location first (so pip metadata references remain valid)
-RUN --mount=type=bind,from=debs,src=/app/debs,target=/tmp/debs \
-    mkdir -p /install && \
-    cp /tmp/debs/*.whl /install/
-
-# Install from permanent location
-RUN pip install /install/*.whl
-
-
 FROM base AS final
 RUN --mount=type=bind,from=debs,src=/app/debs,target=/install \
     pip install /install/*.whl

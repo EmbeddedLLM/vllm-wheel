@@ -5,6 +5,11 @@ ARG BASE_IMAGE=rocm/vllm-dev:base
 
 FROM ${BASE_IMAGE} AS base
 
+# Copy custom ROCm wheels from artifacts (GitHub Actions) or base image
+# This allows wheels to flow through artifacts instead of Docker image layers
+RUN mkdir -p /install
+COPY artifacts/base-wheels/*.whl /install/ || true
+
 ARG ARG_PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH:-${PYTORCH_ROCM_ARCH}}
 
