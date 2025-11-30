@@ -5,7 +5,7 @@ on:
       pytorch_rocm_arch:
         description: 'ROCm GPU architectures (semicolon-separated)'
         required: false
-        default: 'gfx942'
+        default: 'gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151'
       python_version:
         description: 'Python version'
         required: false
