@@ -18,16 +18,16 @@ on:
         description: 'vLLM version (tag like v0.11.2 or branch like main, or "latest" for auto-fetch)'
         required: false
         default: 'latest'
-      debug_mode:
-        description: 'Debug mode: skip Jobs 1&2, reuse artifacts from previous run'
+      reuse_base_wheels:
+        description: 'Reuse base wheels from previous run and rebuild vLLM wheel only (requires previous_run_id)'
         required: false
         default: 'false'
         type: choice
         options:
           - 'false'
           - 'true'
-      skip_to_job4:
-        description: 'Skip to Job 4 only: skip all builds, only publish (requires previous_run_id)'
+      publish_only:
+        description: 'Skip all builds and only publish wheels from previous run (requires previous_run_id)'
         required: false
         default: 'false'
         type: choice
@@ -35,7 +35,7 @@ on:
           - 'false'
           - 'true'
       previous_run_id:
-        description: 'Run ID to reuse artifacts from (required if debug_mode or skip_to_job4 is true)'
+        description: 'Run ID to reuse artifacts from (required if reuse_base_wheels or publish_only is true)'
         required: false
         default: ''
       upload_wheels:
@@ -53,7 +53,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
+    if: github.event.inputs.reuse_base_wheels != 'true' && github.event.inputs.publish_only != 'true'
     runs-on:
       labels: self-hosted
     steps:
@@ -110,7 +110,7 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    if: always() && github.event.inputs.skip_to_job4 != 'true' && (needs.build-base-wheels.result == 'success' || github.event.inputs.debug_mode == 'true')
+    if: always() && github.event.inputs.publish_only != 'true' && (needs.build-base-wheels.result == 'success' || github.event.inputs.reuse_base_wheels == 'true')
     runs-on:
       labels: self-hosted
     steps:
@@ -120,14 +120,14 @@ jobs:
           fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download base Docker image (normal mode)
-        if: github.event.inputs.debug_mode != 'true'
+        if: github.event.inputs.reuse_base_wheels != 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-image
           path: artifacts/docker-image
 
-      - name: Download base Docker image (debug mode - from previous run)
-        if: github.event.inputs.debug_mode == 'true'
+      - name: Download base Docker image (reuse_base_wheels mode - from previous run)
+        if: github.event.inputs.reuse_base_wheels == 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-image
@@ -140,14 +140,14 @@ jobs:
           docker images rocm/vllm-dev:base
 
       - name: Download base wheels (normal mode)
-        if: github.event.inputs.debug_mode != 'true'
+        if: github.event.inputs.reuse_base_wheels != 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-wheels
           path: artifacts/base-wheels
 
-      - name: Download base wheels (debug mode - from previous run)
-        if: github.event.inputs.debug_mode == 'true'
+      - name: Download base wheels (reuse_base_wheels mode - from previous run)
+        if: github.event.inputs.reuse_base_wheels == 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-wheels
@@ -234,7 +234,7 @@ jobs:
   create-pypi-repository:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, build-vllm-wheel]
-    if: github.event.inputs.upload_wheels == 'true' && always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true')
+    if: github.event.inputs.upload_wheels == 'true' && always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.publish_only == 'true')
     runs-on: ubuntu-latest-l
     steps:
       - name: Checkout repository
@@ -243,35 +243,35 @@ jobs:
           fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download all artifacts (normal mode)
-        if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
+        if: github.event.inputs.reuse_base_wheels != 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Download all artifacts (debug mode - from previous run + current)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download all artifacts (reuse_base_wheels mode - from previous run + current)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           run-id: ${{ github.event.inputs.previous_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download vLLM wheel from current run (debug mode)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download vLLM wheel from current run (reuse_base_wheels mode)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel
 
-      - name: Download dependency wheels from current run (debug mode)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download dependency wheels from current run (reuse_base_wheels mode)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           name: dependency-wheels
           path: artifacts/dependency-wheels
 
-      - name: Download all artifacts (skip to job 4 mode - from previous run only)
-        if: github.event.inputs.skip_to_job4 == 'true'
+      - name: Download all artifacts (publish_only mode - from previous run only)
+        if: github.event.inputs.publish_only == 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
