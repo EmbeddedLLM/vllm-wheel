@@ -5,10 +5,17 @@ ARG BASE_IMAGE=rocm/vllm-dev:base
 
 FROM ${BASE_IMAGE} AS base
 
-# Copy custom ROCm wheels from artifacts (GitHub Actions) or base image
-# This allows wheels to flow through artifacts instead of Docker image layers
+# Create /install directory (safe in both modes)
 RUN mkdir -p /install
-COPY artifacts/base-wheels/*.whl /install/ || true
+
+# Copy custom ROCm wheels from artifacts if they exist (GitHub Actions mode)
+# If artifacts don't exist, this is a no-op (local build mode)
+RUN if [ -d artifacts/base-wheels ] && [ -n "$(ls -A artifacts/base-wheels/*.whl 2>/dev/null)" ]; then \
+        echo "Copying custom wheels from artifacts/base-wheels/ to /install/"; \
+        cp artifacts/base-wheels/*.whl /install/; \
+    else \
+        echo "No artifacts found - using BASE_IMAGE wheels if available"; \
+    fi
 
 ARG ARG_PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH:-${PYTORCH_ROCM_ARCH}}
@@ -65,17 +72,47 @@ FROM fetch_vllm AS build_vllm
 # Pin vLLM dependencies to exact versions of custom ROCm wheels
 # This ensures 'pip install vllm' automatically installs correct torch/triton/torchvision/amdsmi
 ARG COMMON_WORKDIR
-COPY tools/vllm-rocm/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py
-RUN python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/requirements/rocm.txt
+
+# Only pin dependencies if custom wheels exist in /install (wheel release mode)
+RUN if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
+        echo "Custom wheels found in /install - will pin dependencies"; \
+    else \
+        echo "No custom wheels in /install - using standard requirements"; \
+    fi
+
+COPY tools/vllm-rocm/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py || true
+RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
+        echo "Pinning vLLM dependencies to custom wheel versions..."; \
+        python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/requirements/rocm.txt; \
+    else \
+        echo "Skipping dependency pinning"; \
+    fi
 
 # Build vLLM
-# Use --find-links to search /install for custom ROCm wheels before PyPI
+# Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
+# Or use standard pip install from PyPI (image release mode)
 RUN cd vllm \
-    && python3 -m pip install --find-links /install -r requirements/rocm.txt \
+    && if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
+           echo "Building vLLM with custom wheels from /install"; \
+           python3 -m pip install --find-links /install -r requirements/rocm.txt; \
+       else \
+           echo "Building vLLM with standard PyPI packages"; \
+           python3 -m pip install -r requirements/rocm.txt; \
+       fi \
     && python3 setup.py clean --all  \
     && python3 setup.py bdist_wheel --dist-dir=dist
 FROM build_vllm AS collect_dependencies
 ARG COMMON_WORKDIR
+
+# Only proceed with dependency collection if custom wheels exist (wheel release mode)
+# In image release mode, skip this entire stage
+RUN if [ ! -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
+        echo "Skipping dependency collection - not in wheel release mode"; \
+        exit 0; \
+    else \
+        echo "Collecting dependencies for wheel release"; \
+    fi
+
 # Install pipdeptree for dependency analysis
 RUN python3 -m pip install pipdeptree
 
