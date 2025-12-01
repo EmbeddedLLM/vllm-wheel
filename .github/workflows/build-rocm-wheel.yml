@@ -161,6 +161,12 @@ jobs:
           ls -lh artifacts/base-wheels/
           echo "Total wheels: $(ls artifacts/base-wheels/*.whl 2>/dev/null | wc -l)"
 
+      - name: Prepare base wheels for Docker build
+        run: |
+          mkdir -p docker/context/base-wheels
+          cp artifacts/base-wheels/*.whl docker/context/base-wheels/
+          ls -lh docker/context/base-wheels/
+
       - name: Get vLLM version
         id: vllm_version
         run: |

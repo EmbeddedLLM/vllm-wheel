@@ -8,13 +8,13 @@ FROM ${BASE_IMAGE} AS base
 # Create /install directory (safe in both modes)
 RUN mkdir -p /install
 
-# Copy custom ROCm wheels from artifacts if they exist (GitHub Actions mode)
-# If artifacts don't exist, this is a no-op (local build mode)
-RUN if [ -d artifacts/base-wheels ] && [ -n "$(ls -A artifacts/base-wheels/*.whl 2>/dev/null)" ]; then \
-        echo "Copying custom wheels from artifacts/base-wheels/ to /install/"; \
-        cp artifacts/base-wheels/*.whl /install/; \
+# Copy custom ROCm wheels from docker/context if they exist (GitHub Actions mode)
+# If docker/context doesn't exist, this is a no-op (local build mode)
+RUN if [ -d docker/context/base-wheels ] && [ -n "$(ls -A docker/context/base-wheels/*.whl 2>/dev/null)" ]; then \
+        echo "Copying custom wheels from docker/context/base-wheels/ to /install/"; \
+        cp docker/context/base-wheels/*.whl /install/; \
     else \
-        echo "No artifacts found - using BASE_IMAGE wheels if available"; \
+        echo "No custom wheels found - using BASE_IMAGE default packages"; \
     fi
 
 ARG ARG_PYTORCH_ROCM_ARCH
