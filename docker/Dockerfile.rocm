@@ -81,7 +81,7 @@ RUN if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
         echo "No custom wheels in /install - using standard requirements"; \
     fi
 
-COPY tools/vllm-rocm/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py || true
+COPY tools/vllm-rocm/pin_rocm_dependencies.py /tmp/pin_rocm_dependencies.py
 RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
         echo "Pinning vLLM dependencies to custom wheel versions..."; \
         python3 /tmp/pin_rocm_dependencies.py /install ${COMMON_WORKDIR}/vllm/requirements/rocm.txt; \
