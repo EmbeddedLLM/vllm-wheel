@@ -328,32 +328,41 @@ jobs:
             exit 1
           fi
 
-      - name: Collect all wheels into single directory
+      - name: Collect custom wheels only
         id: collect_wheels
         timeout-minutes: 30
         run: |
-          echo "Collecting all wheels into single directory for S3 upload..."
-          mkdir -p all-wheels
+          echo "Collecting custom ROCm wheels for S3 upload..."
+          mkdir -p custom-wheels
 
-          # Find and copy all wheels from artifacts
-          find artifacts -name "*.whl" -type f -exec cp {} all-wheels/ \;
+          # Copy base wheels (torch, triton, torchvision, amdsmi, flash_attn, aiter)
+          if [ -d artifacts/rocm-base-wheels ]; then
+            echo "Copying base wheels..."
+            cp artifacts/rocm-base-wheels/*.whl custom-wheels/
+          fi
 
-          WHEEL_COUNT=$(ls all-wheels/*.whl 2>/dev/null | wc -l)
-          echo "Total wheels collected: $WHEEL_COUNT"
+          # Copy vLLM wheel
+          if [ -d artifacts/vllm-wheel ]; then
+            echo "Copying vLLM wheel..."
+            cp artifacts/vllm-wheel/*.whl custom-wheels/
+          fi
+
+          WHEEL_COUNT=$(ls custom-wheels/*.whl 2>/dev/null | wc -l)
+          echo ""
+          echo "Total custom wheels collected: $WHEEL_COUNT"
 
           if [ "$WHEEL_COUNT" -eq 0 ]; then
-            echo "ERROR: No wheels found!"
+            echo "ERROR: No custom wheels found!"
             exit 1
           fi
 
-          # List some sample wheels
           echo ""
-          echo "All sample wheels:"
-          ls -lh all-wheels/
+          echo "Custom wheels:"
+          ls -lh custom-wheels/
 
           echo ""
           echo "Total size:"
-          du -sh all-wheels/
+          du -sh custom-wheels/
 
       - name: Debug - Show artifacts structure
         run: |
@@ -386,10 +395,7 @@ jobs:
           echo ""
           echo "========================================="
 
-      - name: Remove PyPI duplicates of custom ROCm packages
-        run: |
-          chmod +x tools/vllm-rocm/cleanup_pypi_duplicates.sh
-          tools/vllm-rocm/cleanup_pypi_duplicates.sh artifacts/rocm-base-wheels all-wheels
+      # Cleanup step removed - not needed since we only collect custom wheels
 
       - name: Generate PyPI index for S3
         run: |
@@ -402,7 +408,7 @@ jobs:
 
           # Generate index using our script
           python3 tools/vllm-rocm/generate_s3_index.py \
-            --wheels-dir all-wheels \
+            --wheels-dir custom-wheels \
             --output-dir pypi-index \
             --s3-url "$S3_URL" \
             --rocm-version "${{ github.event.inputs.rocm_version }}" \
@@ -429,7 +435,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           bash tools/vllm-rocm/upload_to_s3.sh \
-            all-wheels \
+            custom-wheels \
             pypi-index \
             "${{ secrets.AWS_S3_BUCKET }}" \
             "${{ secrets.AWS_REGION }}"

@@ -255,8 +255,7 @@ COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/tests /tests
 COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/examples /examples
 COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/docker/Dockerfile.rocm /docker/
 COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/.buildkite /.buildkite
-COPY --from=collect_dependencies ${COMMON_WORKDIR}/dependency-wheels /dependency-wheels
-COPY --from=collect_dependencies ${COMMON_WORKDIR}/all-dependencies.txt /all-dependencies.txt
+# Removed: dependency-wheels and all-dependencies.txt (not needed - users get deps from PyPI)
 
 # -----------------------
 # Test vLLM image
