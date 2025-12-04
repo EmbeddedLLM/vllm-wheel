@@ -206,15 +206,6 @@ jobs:
           ls -lh dist/
           ls -lh dist/*.whl
 
-          echo ""
-          echo "Extracted dependency wheels:"
-          ls -lh dist/dependency-wheels/
-          echo "Total dependency wheels: $(ls dist/dependency-wheels/*.whl 2>/dev/null | wc -l)"
-
-          echo ""
-          echo "Dependency list:"
-          cat dist/all-dependencies.txt
-
       - name: Install auditwheel and repair wheel
         run: |
           python -m pip install auditwheel patchelf
