@@ -55,15 +55,9 @@ ARG VLLM_REPO="https://github.com/vllm-project/vllm.git"
 ARG VLLM_BRANCH="main"
 ONBUILD RUN git clone ${VLLM_REPO} \
 	    && cd vllm \
-	    && git fetch -v --prune --tags origin \
-	    && if git show-ref --verify --quiet refs/tags/${VLLM_BRANCH}; then \
-	           echo "Checking out tag: ${VLLM_BRANCH}" && \
-	           git checkout tags/${VLLM_BRANCH}; \
-	       else \
-	           echo "Checking out branch: ${VLLM_BRANCH}" && \
-	           git fetch -v --prune -- origin ${VLLM_BRANCH} && \
-	           git checkout FETCH_HEAD; \
-	       fi \
+	    && git fetch -v --prune -- origin ${VLLM_BRANCH} \
+	    && git checkout FETCH_HEAD \
+	    && echo "Checked out branch: ${VLLM_BRANCH}" \
         && if [ ${VLLM_REPO} != "https://github.com/vllm-project/vllm.git" ] ; then \
                git remote add upstream "https://github.com/vllm-project/vllm.git" \
                && git fetch upstream ; fi
@@ -96,11 +90,12 @@ RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/d
 # Build vLLM
 # Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
 # Or use standard pip install from PyPI (image release mode)
-# Detect if building from a tag and strip 'v' prefix for setuptools_scm
+# Detect if building from a release branch and extract version for setuptools_scm
 RUN cd vllm \
-    && if git show-ref --verify --quiet refs/tags/${VLLM_BRANCH}; then \
-           echo "Building from tag: ${VLLM_BRANCH}"; \
-           VLLM_VERSION="${VLLM_BRANCH#v}"; \
+    && if echo "${VLLM_BRANCH}" | grep -q "^releases/"; then \
+           echo "Building from release branch: ${VLLM_BRANCH}"; \
+           VLLM_VERSION=$(echo "${VLLM_BRANCH}" | sed 's|^releases/v||; s|^releases/||'); \
+           echo "Extracted version: ${VLLM_VERSION}"; \
            echo "Setting SETUPTOOLS_SCM_PRETEND_VERSION=${VLLM_VERSION}"; \
            export SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_VERSION}"; \
        else \
