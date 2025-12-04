@@ -223,12 +223,7 @@ jobs:
           path: artifacts/vllm-wheel/*.whl
           retention-days: 7
 
-      - name: Upload dependency wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-wheels
-          path: dist/dependency-wheels/*.whl
-          retention-days: 7
+      # Dependency wheels upload removed - we only upload custom wheels now
 
   create-pypi-repository:
     name: Create PyPI Repository and Publish
@@ -262,12 +257,7 @@ jobs:
           name: vllm-wheel
           path: artifacts/vllm-wheel
 
-      - name: Download dependency wheels from current run (reuse_base_wheels mode)
-        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: dependency-wheels
-          path: artifacts/dependency-wheels
+      # Dependency wheels download removed - we only use custom wheels now
 
       - name: Download all artifacts (publish_only mode - from previous run only)
         if: github.event.inputs.publish_only == 'true'
