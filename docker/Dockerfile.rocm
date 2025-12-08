@@ -87,6 +87,21 @@ RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/d
         echo "Skipping dependency pinning"; \
     fi
 
+# Patch package name from "vllm" to "vllm-rocm"
+RUN cd vllm \
+    && echo "Patching package name to vllm-rocm..." \
+    && sed -i '0,/^name = "vllm"/s//name = "vllm-rocm"/' pyproject.toml \
+    && echo "Patching version lookups in source files..." \
+    && sed -i \
+        -e "s/importlib\\.metadata\\.version(\\(['\"]\\)vllm\\1)/importlib.metadata.version(\\1vllm-rocm\\1)/" \
+        -e "s/importlib\\.metadata\\.metadata(\\(['\"]\\)vllm\\1)/importlib.metadata.metadata(\\1vllm-rocm\\1)/" \
+        -e "s/version(\\(['\"]\\)vllm\\1)/version(\\1vllm-rocm\\1)/" \
+        vllm/entrypoints/cli/main.py \
+        vllm/entrypoints/cli/run_batch.py \
+        vllm/platforms/__init__.py \
+        vllm/utils/__init__.py 2>/dev/null || true \
+    && echo "Package name patching completed"
+
 # Build vLLM
 # Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
 # Or use standard pip install from PyPI (image release mode)

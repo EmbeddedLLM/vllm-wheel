@@ -128,7 +128,7 @@ check_vllm_metadata() {
 # Process each package type
 #############################################################################
 
-PACKAGES_TO_CHECK=("torch" "triton" "torchvision" "amdsmi" "flash_attn" "aiter")
+PACKAGES_TO_CHECK=("torch" "triton" "torchvision" "amdsmi" "flash_attn" "aiter" "vllm_rocm")
 REMOVED_COUNT=0
 MISSING_CUSTOM_WHEELS=()
 
