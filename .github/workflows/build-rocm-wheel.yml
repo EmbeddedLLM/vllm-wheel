@@ -121,14 +121,14 @@ jobs:
 
       - name: Download base Docker image (normal mode)
         if: github.event.inputs.reuse_base_wheels != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: rocm-base-image
           path: artifacts/docker-image
 
       - name: Download base Docker image (reuse_base_wheels mode - from previous run)
         if: github.event.inputs.reuse_base_wheels == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: rocm-base-image
           path: artifacts/docker-image
@@ -141,14 +141,14 @@ jobs:
 
       - name: Download base wheels (normal mode)
         if: github.event.inputs.reuse_base_wheels != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: rocm-base-wheels
           path: artifacts/base-wheels
 
       - name: Download base wheels (reuse_base_wheels mode - from previous run)
         if: github.event.inputs.reuse_base_wheels == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: rocm-base-wheels
           path: artifacts/base-wheels
@@ -238,13 +238,13 @@ jobs:
 
       - name: Download all artifacts (normal mode)
         if: github.event.inputs.reuse_base_wheels != 'true' && github.event.inputs.publish_only != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
 
       - name: Download all artifacts (reuse_base_wheels mode - from previous run + current)
         if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           run-id: ${{ github.event.inputs.previous_run_id }}
@@ -252,7 +252,7 @@ jobs:
 
       - name: Download vLLM wheel from current run (reuse_base_wheels mode)
         if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel
@@ -261,7 +261,7 @@ jobs:
 
       - name: Download all artifacts (publish_only mode - from previous run only)
         if: github.event.inputs.publish_only == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           run-id: ${{ github.event.inputs.previous_run_id }}
