@@ -95,13 +95,13 @@ jobs:
           docker save rocm/vllm-dev:base | gzip > artifacts/docker-image/rocm-base-image.tar.gz
           ls -lh artifacts/docker-image/
       - name: Upload base wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: rocm-base-wheels
           path: artifacts/base-wheels/*.whl
           retention-days: 7
       - name: Upload base Docker image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: rocm-base-image
           path: artifacts/docker-image/rocm-base-image.tar.gz
@@ -217,7 +217,7 @@ jobs:
           done
           ls -lh artifacts/vllm-wheel/
       - name: Upload vLLM wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel/*.whl
