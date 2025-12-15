@@ -58,7 +58,7 @@ jobs:
       labels: self-hosted
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Fetch full history for correct version detection
       - name: Set up Docker Buildx
@@ -115,7 +115,7 @@ jobs:
       labels: self-hosted
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Fetch full history for correct version detection
 
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest-l
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Fetch full history for correct version detection
 
